@@ -1,0 +1,33 @@
+#! /bin/bash
+
+# description: Description comes here....
+
+# Source function library.
+
+start() {
+    /home/pi/fcserver-rpi /home/pi/fcconfig.json >>/var/log/fcserver.log 2>&1 &
+}
+
+stop() {
+    pkill fcserver-rpi
+}
+
+case "$1" in 
+    start)
+        start
+       ;;
+    stop)
+       stop
+       ;;
+    restart)
+       stop
+       start
+       ;;
+    status)
+       ps aux | grep fcserver-rpi | grep -v grep
+       ;;
+    *)
+       echo "Usage: $0 {start|stop|status|restart}"
+esac
+
+exit 0 
