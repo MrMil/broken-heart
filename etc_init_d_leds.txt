@@ -6,7 +6,7 @@
 
 start() {
     pushd /home/pi/openpixelcontrol/python >/dev/null
-        python3 button_changes_everything.py >>/var/log/led.log 2>&1 &
+        python3 heart.py >>/var/log/led.log 2>&1 &
     popd >/dev/null
 }
 
