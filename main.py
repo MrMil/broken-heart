@@ -1,0 +1,266 @@
+#!/usr/bin/env micropython
+
+import time
+import utime
+from machine import Pin
+import neopixel
+
+# GPIO Configuration
+BUTTON_GPIO = 19
+RIGHT_SIDE_GPIO = 18
+LEFT_SIDE_GPIO = 17
+CENTER_GPIO = 4
+
+# Strip configuration
+LEDS_PER_STRIP = 64
+
+# Color definitions
+PINK = (255, 50, 127)
+RED = (255, 0, 0)
+BLACK = (0, 0, 0)
+PALE_RED = (30, 0, 0)
+
+RAINBOW_8_COLORS = [PINK,
+                    (148, 0, 211),
+                    (75, 0, 130),
+                    (0, 0, 255),
+                    (0, 255, 0),
+                    (255, 255, 0),
+                    (255, 127, 0),
+                    (255, 0, 0)]
+
+# Center strip positions
+CENTER_BOTTOM = 10
+CENTER_MIDDLE = CENTER_BOTTOM + 10
+
+# Global variables
+was_button_pressed = False
+last_center_update = utime.ticks_ms() - 3600000  # 1 hour ago
+heart_state = 3
+last_button_time = 0  # For debouncing
+
+# Initialize NeoPixel strips
+right_strip = neopixel.NeoPixel(Pin(RIGHT_SIDE_GPIO), LEDS_PER_STRIP)
+left_strip = neopixel.NeoPixel(Pin(LEFT_SIDE_GPIO), LEDS_PER_STRIP)
+center_strip = neopixel.NeoPixel(Pin(CENTER_GPIO), LEDS_PER_STRIP)
+
+# Initialize button
+button = Pin(BUTTON_GPIO, Pin.IN, Pin.PULL_UP)
+
+def button_pressed(pin):
+    global was_button_pressed, last_center_update, heart_state, last_button_time
+    
+    # Double-check the pin is actually LOW (button really pressed)
+    if pin.value() != 0:
+        return  # False trigger - pin isn't actually LOW
+    
+    # Debouncing - ignore if button was pressed recently
+    current_time = utime.ticks_ms()
+    if utime.ticks_diff(current_time, last_button_time) < 300:  # 300ms debounce
+        return
+    
+    # Wait a bit and check again to make sure it's a real press
+    time.sleep(0.01)  # 10ms delay
+    if pin.value() != 0:
+        return  # Button not held down - likely just noise
+    
+    last_button_time = current_time
+    print("Button pressed")
+    was_button_pressed = True
+    last_center_update = utime.ticks_ms()
+    if heart_state > 0:
+        heart_state -= 1
+        update_center_state(heart_state)
+        center_strip.write()
+
+# Set up button interrupt
+button.irq(trigger=Pin.IRQ_FALLING, handler=button_pressed)
+
+def set_strip_color(strip, color, start=0, end=None):
+    """Set a range of LEDs in a strip to a specific color"""
+    if end is None:
+        end = LEDS_PER_STRIP
+    for i in range(start, min(end, LEDS_PER_STRIP)):
+        strip[i] = color
+
+def fill_strip(strip, colors):
+    """Fill a strip with a list of colors"""
+    for i, color in enumerate(colors[:LEDS_PER_STRIP]):
+        strip[i] = color
+
+def update_center_state(heart_state):
+    """Update the center strip based on heart state"""
+    if heart_state == 3:
+        set_strip_color(center_strip, RED)
+    elif heart_state == 2:
+        set_strip_color(center_strip, RED, 0, CENTER_MIDDLE)
+        set_strip_color(center_strip, BLACK, CENTER_MIDDLE)
+    elif heart_state == 1:
+        set_strip_color(center_strip, RED, 0, CENTER_BOTTOM)
+        set_strip_color(center_strip, BLACK, CENTER_BOTTOM)
+    elif heart_state == 0:
+        set_strip_color(center_strip, BLACK)
+
+def update_all_strips():
+    """Write all strip changes to the LEDs"""
+    right_strip.write()
+    left_strip.write()
+    center_strip.write()
+
+def heartbeat_on_side(strip, animation_state):
+    """Animate heartbeat on one side strip"""
+    brightness = 95 + 40 * animation_state
+
+    # on
+    set_strip_color(strip, (brightness, 0, 0))
+    strip.write()
+    time.sleep(0.2)
+    
+    # off
+    set_strip_color(strip, PALE_RED)
+    strip.write()
+    time.sleep(0.2)
+    
+    # on
+    set_strip_color(strip, (brightness, 0, 0))
+    strip.write()
+    time.sleep(0.2)
+    
+    # off
+    set_strip_color(strip, PALE_RED)
+    strip.write()
+    time.sleep(0.5)
+
+def advance_broken_heart_animation(animation_state):
+    """Advance the broken heart animation"""
+    if animation_state < 4:
+        heartbeat_on_side(right_strip, animation_state)
+    else:
+        heartbeat_on_side(left_strip, animation_state - 4)
+
+def play_mended_heart_animation():
+    """Play the heart mending animation"""
+    global heart_state
+    
+    # Fill both sides with pink gradually
+    for i in range(LEDS_PER_STRIP):
+        set_strip_color(right_strip, PINK, 0, i)
+        set_strip_color(right_strip, BLACK, i)
+        set_strip_color(left_strip, PINK, 0, i)
+        set_strip_color(left_strip, BLACK, i)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.05)
+
+    # Create rainbow effect
+    current_strip = [PINK] * LEDS_PER_STRIP
+    for i in range(8):
+        for j in range(8):
+            current_strip.pop()
+            current_strip.insert(0, RAINBOW_8_COLORS[i])
+            fill_strip(right_strip, current_strip)
+            fill_strip(left_strip, current_strip)
+            right_strip.write()
+            left_strip.write()
+            time.sleep(0.01 + (((8*i) + j) * 0.002))
+
+    # Flashing effect
+    for i in range(4):
+        set_strip_color(right_strip, PINK)
+        set_strip_color(left_strip, PINK)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.2)
+        
+        fill_strip(right_strip, current_strip)
+        fill_strip(left_strip, current_strip)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.2)
+        
+        set_strip_color(right_strip, PINK)
+        set_strip_color(left_strip, PINK)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.2)
+        
+        fill_strip(right_strip, current_strip)
+        fill_strip(left_strip, current_strip)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.5)
+
+    # Final rainbow state
+    fill_strip(right_strip, current_strip)
+    fill_strip(left_strip, current_strip)
+    right_strip.write()
+    left_strip.write()
+
+    # Restore center heart state gradually
+    for i in range(3):
+        time.sleep(1.5)
+        update_center_state(i + 1)
+        center_strip.write()
+
+    time.sleep(1.5)
+
+    # Fade out rainbow
+    for fade_step in range(255):
+        for pixel in range(LEDS_PER_STRIP):
+            r, g, b = current_strip[pixel]
+            current_strip[pixel] = (max(0, r-1), max(0, g-1), max(0, b-1))
+        fill_strip(right_strip, current_strip)
+        fill_strip(left_strip, current_strip)
+        right_strip.write()
+        left_strip.write()
+        time.sleep(0.01)
+
+def diagnose_button():
+    button.irq(trigger=Pin.IRQ_FALLING, handler=button_pressed)
+    print("Diagnostic complete. Interrupt re-enabled.")
+
+def main():
+    global was_button_pressed, heart_state
+    animation_state = 0
+
+    # Initialize center state
+    update_center_state(heart_state)
+    center_strip.write()
+
+    print("Heart LED controller started...")
+
+    while True:
+        try:
+            if was_button_pressed:
+                was_button_pressed = False
+                if heart_state == 0:
+                    play_mended_heart_animation()
+                    heart_state = 3
+                    update_center_state(heart_state)
+                    center_strip.write()
+                    animation_state = 0
+            elif heart_state < 3:
+                if utime.ticks_diff(utime.ticks_ms(), last_center_update) > 5000:  # 5 seconds
+                    heart_state += 1
+                    update_center_state(heart_state)
+                    center_strip.write()
+            
+            advance_broken_heart_animation(animation_state)
+            animation_state += 1
+            if animation_state == 8:
+                animation_state = 0
+                
+        except KeyboardInterrupt:
+            print("Shutting down...")
+            # Turn off all LEDs
+            set_strip_color(right_strip, BLACK)
+            set_strip_color(left_strip, BLACK)
+            set_strip_color(center_strip, BLACK)
+            update_all_strips()
+            break
+        except Exception as e:
+            print("Error:", e)
+            time.sleep(1)
+
+if __name__ == '__main__':
+    main() 
